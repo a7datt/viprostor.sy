@@ -397,6 +397,12 @@ async function startServer() {
   app.use(express.json());
   const PORT = 3000;
 
+  // Pull data from cloud on startup
+  await pullAllFromCloud();
+
+  // Periodic sync from cloud every 10 minutes
+  setInterval(pullAllFromCloud, 10 * 60 * 1000);
+
   // Helper for Telegram
   const sendTelegramMessage = async (text: string) => {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -922,6 +928,47 @@ async function startServer() {
   }, 2000);
   }
 
+  async function pullAllFromCloud() {
+    if (!supabase) return;
+    console.log("Pulling all data from Supabase...");
+    const tables = [
+      "users", "categories", "subcategories", "sub_sub_categories", "products", 
+      "payment_methods", "banners", "offers", "vouchers", "voucher_uses", 
+      "orders", "order_items", "transactions", "settings", "notifications", 
+      "messages", "daily_message_counts", "user_stats", "telegram_linking_codes", "push_subscriptions"
+    ];
+
+    try {
+      db.exec("PRAGMA foreign_keys = OFF");
+      for (const table of tables) {
+        const { data, error } = await supabase.from(table).select("*");
+        if (error) {
+          if (!error.message.includes("does not exist")) {
+            console.error(`Error pulling ${table}:`, error.message);
+          }
+          continue;
+        }
+        if (data && data.length > 0) {
+          db.prepare(`DELETE FROM ${table}`).run();
+          const columns = Object.keys(data[0]);
+          const placeholders = columns.map(() => "?").join(",");
+          const stmt = db.prepare(`INSERT INTO ${table} (${columns.join(",")}) VALUES (${placeholders})`);
+          db.transaction(() => {
+            data.forEach((row: any) => {
+              const values = columns.map(col => row[col]);
+              stmt.run(...values);
+            });
+          })();
+        }
+      }
+      db.exec("PRAGMA foreign_keys = ON");
+      console.log("Supabase pull complete.");
+    } catch (e) {
+      db.exec("PRAGMA foreign_keys = ON");
+      console.error("Supabase pull failed:", e);
+    }
+  };
+
   const syncToCloud = async (table: string, data: any) => {
     if (!supabase) return;
     try {
@@ -1020,7 +1067,7 @@ async function startServer() {
         }
 
         if (dailyCount && dailyCount.count >= 10) {
-          return res.status(403).json({ error: "لقد وصلت للحد اليومي (10 رسائل)" });
+          return res.status(403).json({ error: "انتهت الرسائل المجانية عد غدا" });
         }
 
         if (!dailyCount) {
@@ -1039,6 +1086,22 @@ async function startServer() {
       }
 
       const result = db.prepare("INSERT INTO messages (user_id, guest_id, sender_role, content, image_url) VALUES (?, ?, ?, ?, ?)").run(user_id || null, guest_id || null, sender_role, content, image_url);
+      
+      // Sync message to cloud
+      const newMsg = db.prepare("SELECT * FROM messages WHERE id = ?").get(result.lastInsertRowid);
+      syncToCloud("messages", newMsg);
+
+      // Sync daily count to cloud
+      if (sender_role === 'user') {
+        const today = new Date().toISOString().split('T')[0];
+        let dailyCount;
+        if (user_id) {
+          dailyCount = db.prepare("SELECT * FROM daily_message_counts WHERE user_id = ? AND date = ?").get(user_id, today);
+        } else {
+          dailyCount = db.prepare("SELECT * FROM daily_message_counts WHERE guest_id = ? AND date = ?").get(guest_id, today);
+        }
+        if (dailyCount) syncToCloud("daily_message_counts", dailyCount);
+      }
       
       if (sender_role === 'user') {
         const senderName = user_id ? (db.prepare("SELECT name FROM users WHERE id = ?").get(user_id) as any)?.name : "ضيف";
@@ -2133,13 +2196,26 @@ async function startServer() {
 
   app.post("/api/admin/import-db", express.json({ limit: '50mb' }), (req, res) => {
     const data = req.body;
-    const tables = ["users", "categories", "subcategories", "products", "orders", "order_items", "transactions", "settings", "banners", "offers"];
+    const tables = [
+      "users", "categories", "subcategories", "sub_sub_categories", "products", 
+      "payment_methods", "banners", "offers", "vouchers", "voucher_uses", 
+      "orders", "order_items", "transactions", "settings", "notifications", 
+      "messages", "daily_message_counts", "user_stats", "telegram_linking_codes", "push_subscriptions"
+    ];
     
     try {
+      db.exec("PRAGMA foreign_keys = OFF");
       const importTransaction = db.transaction(() => {
-        tables.forEach(table => {
+        // Delete in reverse order to respect FKs
+        [...tables].reverse().forEach(table => {
           if (data[table]) {
             db.prepare(`DELETE FROM ${table}`).run();
+          }
+        });
+
+        // Insert in forward order
+        tables.forEach(table => {
+          if (data[table]) {
             const rows = data[table];
             if (rows.length > 0) {
               const columns = Object.keys(rows[0]);
@@ -2154,8 +2230,10 @@ async function startServer() {
         });
       });
       importTransaction();
+      db.exec("PRAGMA foreign_keys = ON");
       res.json({ success: true });
     } catch (e: any) {
+      db.exec("PRAGMA foreign_keys = ON");
       res.status(500).json({ error: e.message });
     }
   });
@@ -2207,6 +2285,15 @@ async function startServer() {
       res.json({ success: true, details: results });
     } catch (e: any) {
       console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/sync-from-cloud", async (req, res) => {
+    try {
+      await pullAllFromCloud();
+      res.json({ success: true });
+    } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
