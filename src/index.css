@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-brand: #B00000;
+  --color-brand-light: #fef2f2;
+  --color-brand-soft: #fee2e2;
+}
+
+@layer base {
+  :root {
+    --bg-primary: #ffffff;
+    --text-primary: #111827;
+    --bg-secondary: #f9fafb;
+    --border-color: #f3f4f6;
+  }
+
+  .dark {
+    --bg-primary: #000000;
+    --text-primary: #ffffff;
+    --bg-secondary: #111111;
+    --border-color: #222222;
+  }
+
+  body {
+    @apply bg-[var(--bg-primary)] text-[var(--text-primary)] transition-colors duration-300;
+  }
+}
+
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  background: black;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.splash-logo {
+  width: 150px;
+  height: 150px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.8; }
+}
+
+/* Override some tailwind classes for dark mode if needed */
+.dark .bg-white { @apply bg-black; }
+.dark .text-gray-800 { @apply text-white; }
+.dark .text-gray-700 { @apply text-gray-200; }
+.dark .text-gray-600 { @apply text-gray-300; }
+.dark .text-gray-500 { @apply text-gray-400; }
+.dark .bg-gray-50 { @apply bg-zinc-900; }
+.dark .bg-gray-100 { @apply bg-zinc-800; }
+.dark .border-gray-100 { @apply border-zinc-800; }
+.dark .border-gray-200 { @apply border-zinc-700; }
+.dark .shadow-sm { @apply shadow-none; }
+.dark .shadow-md { @apply shadow-none; }
+.dark .shadow-lg { @apply shadow-none; }
+.dark .shadow-xl { @apply shadow-none; }
